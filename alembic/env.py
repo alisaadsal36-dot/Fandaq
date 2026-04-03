@@ -30,9 +30,10 @@ if config.config_file_name is not None:
 # Set target metadata for autogenerate
 target_metadata = Base.metadata
 
-# Override SQLAlchemy URL from our settings
+# Override SQLAlchemy URL from our settings (use cleaned URL from database module)
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+from app.database import db_url, connect_args
+config.set_main_option("sqlalchemy.url", db_url)
 
 
 def run_migrations_offline() -> None:
@@ -61,10 +62,12 @@ def do_run_migrations(connection):
 
 async def run_async_migrations():
     """Run migrations in 'online' mode with async engine."""
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
+    from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine
+    
+    connectable = _create_async_engine(
+        db_url,
         poolclass=pool.NullPool,
+        connect_args=connect_args,
     )
 
     async with connectable.connect() as connection:
