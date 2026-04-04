@@ -203,6 +203,80 @@ async def send_financial_alerts():
 
 
 # ══════════════════════════════════════
+#  AUTOMATED DAILY PRICING REPORTS
+# ══════════════════════════════════════
+
+async def send_automated_daily_pricing_reports():
+    """
+    Sends the competitor daily prices summary to hotel owners at the end of the day.
+    """
+    today = date.today()
+    logger.info(f"📊 Running automated daily pricing reports for: {today}")
+
+    async with async_session_factory() as db:
+        # Get active hotels
+        hotels_result = await db.execute(select(Hotel).where(Hotel.is_active == True))
+        hotels = hotels_result.scalars().all()
+
+        from app.models.daily_pricing import DailyPricing
+        for hotel in hotels:
+            stmt = select(DailyPricing).where(
+                DailyPricing.hotel_id == hotel.id,
+                DailyPricing.date == today
+            ).order_by(DailyPricing.my_price.asc())
+            
+            result = await db.execute(stmt)
+            prices = result.scalars().all()
+
+            if not prices:
+                continue
+
+            msg_lines = [
+                f"📊 *تقرير أسعار المنافسين الختامي (مؤتمت)*",
+                f"🏨 الفندق: *{hotel.name}*",
+                f"📅 التاريخ: {today.strftime('%Y-%m-%d')}\n"
+            ]
+
+            for p in prices:
+                diff = float(p.my_price - p.competitor_price)
+                if diff > 0:
+                    diff_mark = f"أرخص منا بـ {diff}"
+                elif diff < 0:
+                    diff_mark = f"أغلى منا بـ {abs(diff)}"
+                else:
+                    diff_mark = "نفس السعر"
+                    
+                msg_lines.append(f"• *{p.competitor_hotel_name}*: {float(p.competitor_price)} ريال (نحن: {float(p.my_price)} ريال) ⟵ {diff_mark}")
+
+            msg_lines.append("\nتم إصدار التقرير من نظام إدارة الفنادق الذكي ✨")
+            message = "\n".join(msg_lines)
+
+            # Send Message
+            try:
+                tg_token = hotel.telegram_bot_token or hotel.settings.get("telegram_bot_token")
+                if tg_token and hotel.owner_whatsapp.startswith("tg_"):
+                    await whatsapp_client.send_telegram_message(bot_token=tg_token, chat_id=hotel.owner_whatsapp, message=message)
+                else:
+                    from app.config import get_settings
+                    settings_app = get_settings()
+                    tg_tok = tg_token or settings_app.TELEGRAM_BOT_TOKEN
+                    if tg_tok and (hotel.owner_whatsapp.startswith("tg_") or (hotel.owner_whatsapp.isdigit() and len(hotel.owner_whatsapp) <= 10)):
+                        await whatsapp_client.send_telegram_message(bot_token=tg_tok, chat_id=hotel.owner_whatsapp, message=message)
+                    else:
+                        await whatsapp_client.send_text_message(
+                            phone_number_id=hotel.whatsapp_phone_number_id or settings_app.WHATSAPP_PHONE_NUMBER_ID,
+                            to=hotel.owner_whatsapp,
+                            message=message,
+                            api_token=hotel.whatsapp_api_token
+                        )
+                logger.info(f"✅ Pricing report sent to owner of {hotel.name}")
+            except Exception as e:
+                logger.error(f"❌ Failed to send pricing report for {hotel.name}: {e}")
+
+    logger.info("📊 Pricing reports complete.")
+
+
+# ══════════════════════════════════════
 #  SCHEDULER INIT
 # ══════════════════════════════════════
 
@@ -213,5 +287,6 @@ def init_scheduler():
     scheduler.add_job(scrape_competitors_job, "cron", hour=8, minute=0)
     scheduler.add_job(send_pre_arrival_reminders, "cron", hour=18, minute=0)
     scheduler.add_job(send_financial_alerts, "cron", hour=21, minute=0)
+    scheduler.add_job(send_automated_daily_pricing_reports, "cron", hour=23, minute=55)
     scheduler.start()
-    logger.info("✅ Scheduler: Scraper(08:00) + Reminders(18:00) + Finance(21:00)")
+    logger.info("✅ Scheduler: Scraper(08:00) + Reminders(18:00) + Finance(21:00) + PricingReport(23:55)")

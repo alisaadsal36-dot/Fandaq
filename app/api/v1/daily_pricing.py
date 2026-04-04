@@ -153,3 +153,136 @@ async def delete_daily_pricing(
     await db.commit()
 
     return {"success": True, "message": "Pricing entry deleted"}
+
+
+@router.get(
+    "/hotels/{hotel_id}/daily-pricing/export",
+    tags=["Reports"],
+)
+async def export_daily_pricing(
+    hotel_id: uuid.UUID,
+    report_date: date = Query(..., alias="date"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export daily pricing for a specific date as CSV."""
+    import csv
+    import io
+    from fastapi.responses import Response
+
+    stmt = select(DailyPricing).where(
+        DailyPricing.hotel_id == hotel_id,
+        DailyPricing.date == report_date
+    ).order_by(DailyPricing.my_price.asc())
+
+    result = await db.execute(stmt)
+    prices = result.scalars().all()
+
+    output = io.StringIO()
+    writer = csv.writer(output, dialect="excel")
+    # CSV Header in Arabic for better dashboard reading by owner
+    writer.writerow(["اسم الفندق المنافس", "تاريخ التسعيرة", "سعر الفندق المنافس", "سعر فندقنا", "الفرق"])
+
+    for p in prices:
+        diff = float(p.my_price - p.competitor_price)
+        if diff > 0:
+            diff_text = f"أغلى بـ {diff}"
+        elif diff < 0:
+            diff_text = f"أرخص بـ {abs(diff)}"
+        else:
+            diff_text = "نفس السعر"
+            
+        writer.writerow([
+            p.competitor_hotel_name,
+            p.date.strftime("%Y-%m-%d"),
+            float(p.competitor_price),
+            float(p.my_price),
+            diff_text
+        ])
+
+    output.seek(0)
+    utf8_content = "\ufeff" + output.getvalue() # Add BOM for Excel UTF-8 compatibility
+    
+    return Response(
+        content=utf8_content.encode("utf-8"),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="daily_pricing_{report_date.strftime("%Y%m%d")}.csv"'}
+    )
+
+
+@router.post(
+    "/hotels/{hotel_id}/daily-pricing/send-report",
+    response_model=dict,
+)
+async def send_daily_pricing_report(
+    hotel_id: uuid.UUID,
+    report_date: date = Query(..., alias="date"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually send the daily pricing report to the hotel owner."""
+    from app.models.hotel import Hotel
+    from app.whatsapp.client import whatsapp_client
+
+    hotel = await db.get(Hotel, hotel_id)
+    if not hotel:
+        raise HTTPException(404, "Hotel not found")
+
+    stmt = select(DailyPricing).where(
+        DailyPricing.hotel_id == hotel_id,
+        DailyPricing.date == report_date
+    ).order_by(DailyPricing.my_price.asc())
+    
+    result = await db.execute(stmt)
+    prices = result.scalars().all()
+
+    if not prices:
+        return {"success": False, "message": "No pricing found for this date"}
+
+    msg_lines = [
+        f"📊 *تقرير أسعار المنافسين اليومي*",
+        f"🏨 الفندق: *{hotel.name}*",
+        f"📅 التاريخ: {report_date.strftime('%Y-%m-%d')}\n"
+    ]
+
+    for p in prices:
+        diff = float(p.my_price - p.competitor_price)
+        if diff > 0:
+            diff_mark = f"أغلى منا بـ {diff}" # wait, if my_price is larger, we are more expensive
+            diff_mark = f"أرخص منا بـ {diff}"
+        elif diff < 0:
+            diff_mark = f"أغلى منا بـ {abs(diff)}"
+        else:
+            diff_mark = "نفس السعر"
+            
+        msg_lines.append(f"• *{p.competitor_hotel_name}*: {float(p.competitor_price)} ريال (نحن: {float(p.my_price)} ريال) ⟵ {diff_mark}")
+
+    msg_lines.append("\nتم إصدار التقرير من نظام إدارة الفنادق الذكي ✨")
+    message = "\n".join(msg_lines)
+
+    # Use telegram if preferred, or whatsapp
+    tg_token = hotel.telegram_bot_token or hotel.settings.get("telegram_bot_token")
+    if tg_token and hotel.owner_whatsapp.startswith("tg_"):
+        await whatsapp_client.send_telegram_message(
+            bot_token=tg_token,
+            chat_id=hotel.owner_whatsapp,
+            message=message
+        )
+    else:
+        # Fallback to general settings if no telegram
+        from app.config import get_settings
+        settings_app = get_settings()
+        tg_tok = tg_token or settings_app.TELEGRAM_BOT_TOKEN
+        if tg_tok and (hotel.owner_whatsapp.startswith("tg_") or (hotel.owner_whatsapp.isdigit() and len(hotel.owner_whatsapp) <= 10)):
+            await whatsapp_client.send_telegram_message(
+                bot_token=tg_tok,
+                chat_id=hotel.owner_whatsapp,
+                message=message
+            )
+        else:
+            await whatsapp_client.send_text_message(
+                phone_number_id=hotel.whatsapp_phone_number_id or settings_app.WHATSAPP_PHONE_NUMBER_ID,
+                to=hotel.owner_whatsapp,
+                message=message,
+                api_token=hotel.whatsapp_api_token
+            )
+
+    return {"success": True, "message": "Report sent to owner"}
