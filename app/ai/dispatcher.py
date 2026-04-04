@@ -152,14 +152,13 @@ async def _handle_create_reservation(
     logger.info(f"[CREATE_RESERVATION] raw data from AI: {data}")
     logger.info(f"[CREATE_RESERVATION] parsed: room_type='{room_type}', check_in={check_in}, check_out={check_out}")
 
-    if not room_type or not check_in or not check_out or not guest_name or not nationality or not id_number:
+    if not room_type or not check_in or not check_out or not guest_name or not nationality:
         missing = []
         if not room_type: missing.append("نوع الغرفة")
         if not check_in: missing.append("تاريخ الدخول")
         if not check_out: missing.append("تاريخ الخروج")
         if not guest_name: missing.append("اسمك الكريم")
         if not nationality: missing.append("جنسيتك")
-        if not id_number: missing.append("رقم الهوية / الجواز")
         return {
             "response": f"عشان أسجل حجزك، نحتاج الله يعافيك: {'، '.join(missing)}. "
                         "ياليت تزودني بهالبيانات.",
@@ -205,16 +204,16 @@ async def _handle_create_reservation(
         
         # Notify owner
         owner_msg = (
-            f"✅ تم تسجيل طلب الحجز بنجاح!\n\n"
-            f"📋 رقم الطلب: {short_id}\n"
+            f"✅ *طلب حجز جديد*\n\n"
+            f"👤 الضيف: {guest_name} ({nationality})\n"
+            f"📱 الجوال: {phone}\n"
             f"🏨 الغرفة: {room_val}\n"
             f"📅 {date_str}\n"
             f"💰 الإجمالي: {int(float(result['total_price']))} ريال\n\n"
-            f"⏳ حالة الطلب: بانتظار موافقة الإدارة\n\n"
+            f"📋 رقم الطلب: {short_id}\n"
             f"✍️ للرد:\n"
             f"موافق {short_id}\n"
-            f"أو\n"
-            f"رفض {short_id}"
+            f"أو رفض {short_id}"
         )
         return {
             "response": response,

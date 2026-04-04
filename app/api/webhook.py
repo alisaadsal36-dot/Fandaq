@@ -25,6 +25,11 @@ from app.services.guest import GuestService
 from app.services.whatsapp_session import WhatsAppSessionService
 from app.whatsapp.parser import parse_webhook_payload, parse_telegram_update
 from app.whatsapp.client import whatsapp_client
+from app.services.speech import (
+    transcribe_audio,
+    download_whatsapp_media,
+    download_telegram_voice,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -262,12 +267,175 @@ async def _process_message(msg, db: AsyncSession, source: str = "whatsapp", forc
             for rt in rt_result.scalars().all()
         ]
 
-        # 9. Extract intent via AI (same AI brain for WhatsApp & Telegram)
+        # 9. Transcribe audio messages via Whisper-1
+        if msg.audio_media_id and not msg.text:
+            try:
+                if is_telegram:
+                    tg_token = hotel.telegram_bot_token or settings.TELEGRAM_BOT_TOKEN
+                    audio_bytes = await download_telegram_voice(msg.audio_media_id, tg_token)
+                else:
+                    audio_bytes = await download_whatsapp_media(
+                        msg.audio_media_id,
+                        api_token=hotel.whatsapp_api_token,
+                    )
+
+                transcribed_text = await transcribe_audio(audio_bytes, file_extension="ogg")
+
+                if transcribed_text:
+                    msg.text = transcribed_text
+                    logger.info(f"Voice transcribed for {msg.sender_phone}: {transcribed_text[:60]}...")
+                else:
+                    # Couldn't transcribe — let the user know
+                    sorry_msg = "عذراً، ما قدرت أفهم الرسالة الصوتية. ممكن تكتب لي؟ ✍️"
+                    if is_telegram:
+                        tg_tok = hotel.telegram_bot_token or settings.TELEGRAM_BOT_TOKEN
+                        await whatsapp_client.send_telegram_message(
+                            bot_token=tg_tok,
+                            chat_id=msg.sender_phone,
+                            message=sorry_msg,
+                        )
+                    else:
+                        await whatsapp_client.send_text_message(
+                            phone_number_id=hotel.whatsapp_phone_number_id,
+                            to=msg.sender_phone,
+                            message=sorry_msg,
+                            api_token=hotel.whatsapp_api_token,
+                        )
+                    await db.commit()
+                    return
+            except Exception as e:
+                logger.error(f"Audio transcription pipeline error: {e}", exc_info=True)
+                sorry_msg = "عذراً، حصلت مشكلة في معالجة الرسالة الصوتية. ممكن تكتب لي؟ ✍️"
+                if is_telegram:
+                    tg_tok = hotel.telegram_bot_token or settings.TELEGRAM_BOT_TOKEN
+                    await whatsapp_client.send_telegram_message(
+                        bot_token=tg_tok,
+                        chat_id=msg.sender_phone,
+                        message=sorry_msg,
+                    )
+                else:
+                    await whatsapp_client.send_text_message(
+                        phone_number_id=hotel.whatsapp_phone_number_id,
+                        to=msg.sender_phone,
+                        message=sorry_msg,
+                        api_token=hotel.whatsapp_api_token,
+                    )
+                await db.commit()
+                return
+
+        # 10. Skip if still no text after transcription attempt
+        if not msg.text:
+            logger.info(f"No text content for message {msg.message_id}, skipping")
+            await db.commit()
+            return
+
+        # 10.5 SMART RATING INTERCEPTION — bypass AI if pending_rating is set
+        # When checkout sends a rating request, it sets pending_rating=true.
+        # If the guest replies with a number 1-5 (optionally with text), we handle it
+        # directly without involving the AI, which can misinterpret short numbers.
+        pending_rating = (session.context or {}).get("pending_rating", False)
+        if pending_rating and not is_owner:
+            import re
+            # Match: "3", "٣", "5 كل شي ممتاز", "4 الغرفة حلوة", etc.
+            # Arabic-Indic digits (٠-٩) and Western digits (0-9)
+            rating_match = re.match(
+                r'^[\s]*([1-5١-٥])[\s]*(.*)',
+                msg.text.strip(),
+                re.DOTALL
+            )
+            if rating_match:
+                # Convert Arabic-Indic digit to Western if needed
+                digit_map = {'١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5'}
+                raw_digit = rating_match.group(1)
+                rating_val = int(digit_map.get(raw_digit, raw_digit))
+                comment_text = rating_match.group(2).strip() or str(rating_val)
+
+                logger.info(
+                    f"RATING INTERCEPT: pending_rating=True, rating={rating_val}, "
+                    f"comment='{comment_text}', sender={msg.sender_phone}"
+                )
+
+                # Dispatch directly to submit_review
+                review_data = {
+                    "rating": rating_val,
+                    "comment": comment_text,
+                    "category": "general",
+                }
+                result = await dispatch_intent(
+                    db=db,
+                    hotel_id=hotel.id,
+                    intent="submit_review",
+                    data=review_data,
+                    sender_phone=msg.sender_phone,
+                    is_owner=False,
+                    guest_id=guest_id,
+                )
+                response_text = result.get("response", "شكراً على تقييمك! 😊")
+
+                # Clear pending_rating flag
+                from sqlalchemy import update as sql_update
+                from app.models.whatsapp_session import WhatsAppSession as WS
+                ctx = session.context or {}
+                ctx["pending_rating"] = False
+                await db.execute(
+                    sql_update(WS).where(WS.id == session.id).values(context=ctx)
+                )
+
+                # Save to history
+                await WhatsAppSessionService.append_to_history(
+                    db, session.id, role="user", content=msg.text
+                )
+                await WhatsAppSessionService.append_to_history(
+                    db, session.id, role="assistant", content=response_text
+                )
+
+                # Send response
+                tg_token = hotel.telegram_bot_token or settings.TELEGRAM_BOT_TOKEN
+                if is_telegram:
+                    await whatsapp_client.send_telegram_message(
+                        bot_token=tg_token,
+                        chat_id=msg.sender_phone,
+                        message=response_text,
+                    )
+                else:
+                    await whatsapp_client.send_text_message(
+                        phone_number_id=hotel.whatsapp_phone_number_id,
+                        to=msg.sender_phone,
+                        message=response_text,
+                        api_token=hotel.whatsapp_api_token,
+                    )
+
+                await db.commit()
+                return
+
+        # 11. Extract intent via AI (same AI brain for WhatsApp & Telegram)
         guest_name_for_ai = None
         guest_nationality_for_ai = None
         guest_id_number_for_ai = None
-        
+        guest_room_number_for_ai = None
+
         if not is_owner and guest_id:
+            # Look for active reservation (CHECKED_IN preferred)
+            from app.models.reservation import Reservation, ReservationStatus
+            from sqlalchemy.orm import selectinload
+            
+            res_stmt = (
+                select(Reservation)
+                .where(
+                    Reservation.guest_id == guest_id,
+                    Reservation.hotel_id == hotel.id,
+                    Reservation.status.in_([ReservationStatus.CHECKED_IN, ReservationStatus.CONFIRMED])
+                )
+                .options(selectinload(Reservation.room))
+                .order_by(desc(Reservation.status == ReservationStatus.CHECKED_IN), Reservation.created_at.desc())
+                .limit(1)
+            )
+            res_result = await db.execute(res_stmt)
+            active_res = res_result.scalar_one_or_none()
+            
+            if active_res and active_res.room:
+                guest_room_number_for_ai = active_res.room.room_number
+
             # Only use the name if it's meaningful (not just a phone number or placeholder)
             if guest.name and guest.name != msg.sender_phone and guest.name != "Telegram User":
                 guest_name_for_ai = guest.name
@@ -277,13 +445,14 @@ async def _process_message(msg, db: AsyncSession, source: str = "whatsapp", forc
                 guest_id_number_for_ai = guest.id_number
 
         intent_result = await extract_intent(
-            msg.text, 
-            history=history, 
+            msg.text,
+            history=history,
             hotel_room_types=room_types,
             hotel_name=hotel.name,
             guest_name=guest_name_for_ai,
             guest_nationality=guest_nationality_for_ai,
             guest_id_number=guest_id_number_for_ai,
+            guest_room_number=guest_room_number_for_ai,
         )
         
         ai_response = intent_result.get("response")

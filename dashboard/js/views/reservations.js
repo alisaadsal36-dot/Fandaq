@@ -17,9 +17,12 @@ async function loadReservations() {
     ${pending.length > 0 && resFilter !== 'confirmed' ? `
     <div class="pending-section">
       <div class="section-title">⏳ حجوزات تنتظر موافقتك (${pending.length})</div>
-      <div class="pending-cards">${pending.map(r => `
+      <div class="pending-cards">${pending.map((r, i) => `
         <div class="pending-card" id="pcard-${r.id}">
-          <div class="pending-card-id">📋 #${String(r.id).slice(0, 6).toUpperCase()}</div>
+          <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px">
+            <div class="pending-card-id">📋 #${String(r.id).slice(0, 6).toUpperCase()}</div>
+            <button class="btn btn-sm" style="padding:2px 8px; font-size:12px; background:rgba(255,165,0,0.1); color:orange; border:1px solid rgba(255,165,0,0.2)" onclick="showGuestInfoFromPending(${i})">ℹ️ بيانات الضيف</button>
+          </div>
           <div class="pending-card-info"><span>نوع الغرفة: </span>${roomTypeLabel(r.room_type_id || '')}</div>
           <div class="pending-card-info"><span>الدخول: </span>${fmtDate(r.check_in)}</div>
           <div class="pending-card-info"><span>الخروج: </span>${fmtDate(r.check_out)}</div>
@@ -47,15 +50,17 @@ async function loadReservations() {
       <table><thead><tr><th>رقم الحجز</th><th>تاريخ الإنشاء</th><th>الضيف</th><th>الغرفة</th><th>الدخول</th><th>الخروج</th><th>السعر</th><th>الحالة</th><th>إجراء</th></tr></thead>
       <tbody id="res-tbody">${renderResMarkup(all)}</tbody></table></div>`;
 }
+
 function filterReservations(q) {
   const query = (q || '').toLowerCase();
   const dStart = document.getElementById('res-date-start')?.value;
   const dEnd = document.getElementById('res-date-end')?.value;
   const filtered = GLOBAL_DATA.all_res.filter(r => {
     const textMatch = String(r.id).toLowerCase().includes(query) ||
-      roomTypeLabel(r.room_type_id || '').includes(query) ||
-      String(r.total_price).includes(query) ||
-      fmtDate(r.check_in).includes(query);
+      (r.guest_name || '').toLowerCase().includes(query) ||
+      (r.guest_phone || '').includes(query) ||
+      (r.room_number || '').includes(query);
+      
     let dateMatch = true;
     const rDate = r.check_in.split('T')[0];
     if (dStart && rDate < dStart) dateMatch = false;
@@ -65,11 +70,19 @@ function filterReservations(q) {
   document.getElementById('res-tbody').innerHTML = renderResMarkup(filtered);
   document.getElementById('res-count').textContent = filtered.length + ' حجز';
 }
+
 function renderResMarkup(all) {
   if (!all.length) return '<tr><td colspan="9"><div class="empty-state"><div class="emoji">📭</div>لا توجد حجوزات مطابقة</div></td></tr>';
   return all.map(r => `
     <tr><td style="font-family:monospace;color:var(--accent)">#${String(r.id).slice(0, 6).toUpperCase()}</td>
-    <td>${fmtDate(r.created_at)}</td><td style="font-weight:bold;">${r.guest_name || 'غير محدد'}</td><td><span class="badge" style="background:var(--tertiary);color:var(--text)">غرفة ${r.room_number || 'غير محدد'}</span></td><td>${fmtDate(r.check_in)}</td><td>${fmtDate(r.check_out)}</td>
+    <td>${fmtDate(r.created_at)}</td>
+    <td style="font-weight:bold;">
+      <div style="display:flex; align-items:center; gap:8px">
+        ${r.guest_name || 'غير محدد'}
+        <button class="btn-icon-sh" title="بيانات الضيف" onclick="showGuestInfo('${r.id}')">ℹ️</button>
+      </div>
+    </td>
+    <td><span class="badge" style="background:var(--tertiary);color:var(--text)">غرفة ${r.room_number || 'غير محدد'}</span></td><td>${fmtDate(r.check_in)}</td><td>${fmtDate(r.check_out)}</td>
     <td>${fmtMoney(r.total_price)}</td><td>${badgeHtml(r.status)}</td>
     <td>${r.status === 'pending' ? `<button class="btn btn-success btn-sm" onclick="confirmRes('${r.id}')">✅</button>
       <button class="btn btn-danger btn-sm" onclick="rejectRes('${r.id}')">❌</button>` :
@@ -77,6 +90,42 @@ function renderResMarkup(all) {
       <button class="btn btn-danger btn-sm" onclick="cancelRes('${r.id}')">إلغاء</button>` :
         r.status === 'checked_in' ? `<button class="btn btn-success btn-sm" onclick="checkOutRes('${r.id}')">تسجيل خروج</button>` : '—'}</td></tr>`).join('');
 }
+
+function showGuestInfo(resId) {
+  const r = GLOBAL_DATA.all_res.find(x => x.id === resId);
+  if (!r) return;
+  _displayGuestModal(r);
+}
+
+function showGuestInfoFromPending(idx) {
+  const r = GLOBAL_DATA.pending_res[idx];
+  if (!r) return;
+  _displayGuestModal(r);
+}
+
+function _displayGuestModal(r) {
+  const body = `
+    <div class="guest-info-modal">
+      <div class="info-row"><span>🧑 الاسم:</span> <b>${r.guest_name || 'غير محدد'}</b></div>
+      <div class="info-row"><span>📱 الجوال:</span> <b>${r.guest_phone || 'غير متوفر'}</b></div>
+      <div class="info-row"><span>🇸🇦 الجنسية:</span> <b>${r.guest_nationality || 'غير محدد'}</b></div>
+      <div class="info-row"><span>🪪 رقم الهوية:</span> <b>${r.guest_id_number || 'غير مسجل'}</b></div>
+      <hr style="border:0; border-top:1px solid var(--border); margin:15px 0">
+      <div class="info-row"><span>🏨 تفاصيل الحجز:</span> #${String(r.id).slice(0, 8).toUpperCase()}</div>
+      <div class="info-row"><span>📅 الموعد:</span> ${fmtDate(r.check_in)} إلى ${fmtDate(r.check_out)}</div>
+    </div>
+    <style>
+      .guest-info-modal { padding: 10px 0; }
+      .info-row { display: flex; justify-content: space-between; margin-bottom: 12px; font-size: 15px; color: var(--text); }
+      .info-row span { color: var(--muted); }
+      .btn-icon-sh { background:none; border:none; cursor:pointer; font-size:14px; opacity:0.6; padding:0; }
+      .btn-icon-sh:hover { opacity:1; }
+    </style>
+  `;
+  const foot = `<button class="btn btn-primary" onclick="closeModal()">تم</button>`;
+  openModal('📋 تفاصيل الضيف', body, foot);
+}
+
 function setResFilter(f) { resFilter = f; loadReservations(); }
 async function confirmRes(id) {
   try {

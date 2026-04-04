@@ -29,6 +29,7 @@ async def extract_intent(
     guest_name: str | None = None,
     guest_nationality: str | None = None,
     guest_id_number: str | None = None,
+    guest_room_number: str | None = None,
 ) -> dict:
     """
     Send a WhatsApp message to the AI and get a natural response + structured intent.
@@ -37,7 +38,7 @@ async def extract_intent(
         dict with 'response', 'intent' and 'data' keys.
         On failure, returns fallback response.
     """
-    system_prompt = get_system_prompt(current_date, hotel_room_types, hotel_name, guest_name, guest_nationality, guest_id_number)
+    system_prompt = get_system_prompt(current_date, hotel_room_types, hotel_name, guest_name, guest_nationality, guest_id_number, guest_room_number)
 
     try:
         messages = [{"role": "system", "content": system_prompt}]
@@ -45,17 +46,34 @@ async def extract_intent(
             messages.extend(history)
         messages.append({"role": "user", "content": message})
 
+        # Log full context for debugging
+        logger.info(f"AI Context [Messages Count: {len(messages)}]:")
+        for m in messages:
+            content_snippet = m['content'][:100].replace('\n', ' ')
+            logger.info(f"  - {m['role']}: {content_snippet}...")
+
         response = await client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             messages=messages,
-            temperature=0.7,  # More natural/creative responses
-            max_tokens=800,
+            max_completion_tokens=16000,
             response_format={"type": "json_object"},
-            timeout=8.0,  # Give it more time for natural responses
+            timeout=30.0,  # o4-mini needs more time for reasoning
         )
 
-        content = response.choices[0].message.content.strip()
-        logger.info(f"AI response: {content}")
+        content = response.choices[0].message.content
+        logger.info(f"AI raw response content: {content}")
+        logger.info(f"AI finish_reason: {response.choices[0].finish_reason}")
+        
+        # o4-mini may return None content if it used all tokens for reasoning
+        if not content:
+            logger.warning("AI returned empty content (possible reasoning-only response)")
+            return {
+                "response": "عذراً واجهتنا مشكلة بسيطة، ممكن تعيد رسالتك؟ 🙏",
+                "intent": None,
+                "data": {},
+            }
+        
+        content = content.strip()
 
         # Parse JSON
         result = json.loads(content)
@@ -120,8 +138,7 @@ async def generate_review_reply(rating: int, comment: str | None = None, categor
         response = await client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             messages=[{"role": "user", "content": prompt.strip()}],
-            temperature=0.6,
-            max_tokens=200,
+            max_completion_tokens=200,
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -156,9 +173,8 @@ async def detect_recurring_complaints(new_complaint: str, past_complaints_texts:
         response = await client.chat.completions.create(
             model=settings.OPENAI_MODEL,
             messages=[{"role": "user", "content": prompt.strip()}],
-            temperature=0.1,
             response_format={"type": "json_object"},
-            max_tokens=150,
+            max_completion_tokens=150,
         )
         return json.loads(response.choices[0].message.content.strip())
     except Exception as e:
