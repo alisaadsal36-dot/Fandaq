@@ -42,33 +42,51 @@ async def send_email_with_attachment(
             filename=attachment_name
         )
 
-    # Send email
-    try:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"📧 Attempting to send email to {to_email} via {smtp_host}:{smtp_port} (User: {smtp_user})")
-        
-        if smtp_port == 465:
-            # TLS
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Primary transport from env, with Gmail-safe fallback between 465 and 587.
+    attempts: list[dict] = []
+    if smtp_port == 465:
+        attempts.append({"port": 465, "use_tls": True, "start_tls": False})
+        attempts.append({"port": 587, "use_tls": False, "start_tls": True})
+    elif smtp_port == 587:
+        attempts.append({"port": 587, "use_tls": False, "start_tls": True})
+        attempts.append({"port": 465, "use_tls": True, "start_tls": False})
+    else:
+        attempts.append({"port": smtp_port, "use_tls": smtp_port == 465, "start_tls": smtp_port != 465})
+
+    last_error: Exception | None = None
+    for i, attempt in enumerate(attempts, start=1):
+        port = attempt["port"]
+        use_tls = attempt["use_tls"]
+        start_tls = attempt["start_tls"]
+        try:
+            logger.info(
+                "📧 Attempt %s to send email to %s via %s:%s (use_tls=%s,start_tls=%s)",
+                i,
+                to_email,
+                smtp_host,
+                port,
+                use_tls,
+                start_tls,
+            )
             await aiosmtplib.send(
                 msg,
                 hostname=smtp_host,
-                port=smtp_port,
+                port=port,
                 username=smtp_user,
                 password=smtp_password,
-                use_tls=True
+                use_tls=use_tls,
+                start_tls=start_tls,
+                timeout=25,
             )
-        else:
-            # STARTTLS
-            await aiosmtplib.send(
-                msg,
-                hostname=smtp_host,
-                port=smtp_port,
-                username=smtp_user,
-                password=smtp_password,
-                start_tls=True
-            )
-        logger.info(f"✅ Email sent successfully to {to_email}")
-    except Exception as e:
-        logger.error(f"❌ Email sending failed for {to_email}: {str(e)}")
-        raise e
+            logger.info("✅ Email sent successfully to %s", to_email)
+            return
+        except Exception as e:
+            last_error = e
+            logger.warning("⚠️ SMTP attempt %s failed on %s:%s -> %s", i, smtp_host, port, str(e))
+
+    logger.error("❌ Email sending failed for %s after all SMTP attempts: %s", to_email, str(last_error))
+    if last_error:
+        raise last_error
