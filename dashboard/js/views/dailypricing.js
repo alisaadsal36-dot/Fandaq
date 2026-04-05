@@ -267,6 +267,7 @@ function downloadPricingExcel(dateStr) {
 async function sendPricingReport(dateStr) {
   // Get items for this date from the API (since local variable won't be in scope from load function)
   try {
+    showToast('جاري إرسال التقرير...', 'success');
     const data = await apiFetch(`/hotels/${HOTEL_ID}/daily-pricing?from_date=${dateStr}&to_date=${dateStr}`);
     const items = data.items || [];
 
@@ -280,7 +281,16 @@ async function sendPricingReport(dateStr) {
     showToast(`تم إرسال التقرير الموحد بنجاح (${count}) مستلمين`);
 
   } catch (e) {
-    showToast('فشل إرسال التقرير الموحد', 'error');
+    let msg = 'فشل إرسال التقرير الموحد';
+    const raw = String(e?.message || e || '');
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed?.detail) msg = parsed.detail;
+      else if (parsed?.message) msg = parsed.message;
+    } catch (_) {
+      if (raw.includes('No valid recipient emails')) msg = 'لا يوجد بريد صالح للمدير/المشرف لإرسال التقرير';
+    }
+    showToast(msg, 'error');
   }
 }
 

@@ -17,6 +17,31 @@ logger = logging.getLogger(__name__)
 
 class EmailAgentService:
     @staticmethod
+    def _decode_mime_header(value: str | None) -> str:
+        parts = decode_header(value or "")
+        decoded: list[str] = []
+        for part, encoding in parts:
+            if isinstance(part, bytes):
+                decoded.append(part.decode(encoding or "utf-8", errors="replace"))
+            else:
+                decoded.append(part)
+        return "".join(decoded).strip()
+
+    @staticmethod
+    def _decode_payload(payload: bytes | None, charset: str | None = None) -> str:
+        if not payload:
+            return ""
+        candidates = [charset, "utf-8", "cp1256", "latin-1"]
+        for enc in candidates:
+            if not enc:
+                continue
+            try:
+                return payload.decode(enc)
+            except Exception:
+                continue
+        return payload.decode("utf-8", errors="replace")
+
+    @staticmethod
     async def poll_and_process():
         """Polls for unread emails and processes replies."""
         settings = get_settings()
@@ -56,9 +81,7 @@ class EmailAgentService:
                             if res.scalar_one_or_none():
                                 continue
 
-                        subject, encoding = decode_header(msg["Subject"] or "")[0]
-                        if isinstance(subject, bytes):
-                            subject = subject.decode(encoding or "utf-8")
+                        subject = EmailAgentService._decode_mime_header(msg.get("Subject"))
                         
                         from_email = email.utils.parseaddr(msg["From"])[1]
                         
@@ -69,12 +92,18 @@ class EmailAgentService:
                                 content_type = part.get_content_type()
                                 content_disposition = str(part.get("Content-Disposition"))
                                 if content_type == "text/plain" and "attachment" not in content_disposition:
-                                    body = part.get_payload(decode=True).decode()
+                                    body = EmailAgentService._decode_payload(
+                                        part.get_payload(decode=True),
+                                        part.get_content_charset(),
+                                    )
                                     break
                         else:
                             payload = msg.get_payload(decode=True)
                             if payload:
-                                body = payload.decode()
+                                body = EmailAgentService._decode_payload(
+                                    payload,
+                                    msg.get_content_charset(),
+                                )
 
                         if body:
                             # Process and then mark as processed
