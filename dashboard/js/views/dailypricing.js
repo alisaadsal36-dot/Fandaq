@@ -278,7 +278,10 @@ async function sendPricingReport(dateStr) {
 
     const resp = await apiFetch(`/hotels/${HOTEL_ID}/daily-pricing/send-report?date=${dateStr}`, { method: 'POST' });
     const count = Array.isArray(resp.recipients) ? resp.recipients.length : 0;
-    showToast(`تم إرسال التقرير الموحد بنجاح (${count}) مستلمين`);
+    const recipientsText = Array.isArray(resp.recipients) && resp.recipients.length
+      ? ` → ${resp.recipients.join(', ')}`
+      : '';
+    showToast(`تم إرسال التقرير الموحد بنجاح (${count}) مستلمين${recipientsText}`);
 
   } catch (e) {
     let msg = 'فشل إرسال التقرير الموحد';

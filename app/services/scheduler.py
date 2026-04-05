@@ -258,8 +258,17 @@ def init_scheduler():
     scheduler.add_job(send_financial_alerts, "cron", hour=21, minute=0)
     scheduler.add_job(send_automated_daily_pricing_reports, "cron", hour=0, minute=0)
     
-    # Poll for email replies every 10 seconds for instant responsiveness
-    scheduler.add_job(poll_email_replies_job, "interval", seconds=10)
+    # Poll owner emails on a safer cadence to avoid overlap on slow IMAP cycles.
+    scheduler.add_job(
+        poll_email_replies_job,
+        "interval",
+        seconds=30,
+        id="poll_email_replies_job",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=60,
+        replace_existing=True,
+    )
     
     scheduler.start()
-    logger.info("✅ Scheduler: Scraper, Reminders, Finance, MidnightReport(00:00) + EmailAgent(10s)")
+    logger.info("✅ Scheduler: Scraper, Reminders, Finance, MidnightReport(00:00) + EmailAgent(30s)")
