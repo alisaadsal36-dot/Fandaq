@@ -5,6 +5,7 @@ import logging
 import json
 import re
 import hashlib
+import codecs
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,13 +17,29 @@ from app.models.room_type import RoomType
 logger = logging.getLogger(__name__)
 
 class EmailAgentService:
+    MAX_EMAILS_PER_POLL = 20
+
+    IGNORED_SENDER_PATTERNS = (
+        "no-reply@",
+        "noreply@",
+        "mailer-daemon@",
+        "postmaster@",
+    )
+
     @staticmethod
     def _decode_mime_header(value: str | None) -> str:
         parts = decode_header(value or "")
         decoded: list[str] = []
         for part, encoding in parts:
             if isinstance(part, bytes):
-                decoded.append(part.decode(encoding or "utf-8", errors="replace"))
+                enc = (encoding or "utf-8").strip().lower()
+                if enc in {"unknown-8bit", "x-unknown", "unknown"}:
+                    enc = "utf-8"
+                try:
+                    codecs.lookup(enc)
+                except Exception:
+                    enc = "utf-8"
+                decoded.append(part.decode(enc, errors="replace"))
             else:
                 decoded.append(part)
         return "".join(decoded).strip()
@@ -42,6 +59,13 @@ class EmailAgentService:
         return payload.decode("utf-8", errors="replace")
 
     @staticmethod
+    def _should_ignore_sender(sender_email: str | None) -> bool:
+        if not sender_email:
+            return True
+        lowered = sender_email.strip().lower()
+        return any(token in lowered for token in EmailAgentService.IGNORED_SENDER_PATTERNS)
+
+    @staticmethod
     async def poll_and_process():
         """Polls for unread emails and processes replies."""
         settings = get_settings()
@@ -54,12 +78,14 @@ class EmailAgentService:
             mail.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
             mail.select("inbox")
 
-            # Search for ALL emails in inbox (deduplication handles safety)
-            status, messages = mail.search(None, 'ALL')
+            # Process only unread emails to avoid scanning the whole mailbox every poll.
+            status, messages = mail.search(None, 'UNSEEN')
             if status != 'OK':
                 return
 
-            for num in messages[0].split():
+            # Avoid long-running polls when mailbox has many unread messages.
+            email_ids = messages[0].split()[-EmailAgentService.MAX_EMAILS_PER_POLL:]
+            for num in email_ids:
                 status, data = mail.fetch(num, '(RFC822)')
                 if status != 'OK':
                     continue
@@ -84,6 +110,8 @@ class EmailAgentService:
                         subject = EmailAgentService._decode_mime_header(msg.get("Subject"))
                         
                         from_email = email.utils.parseaddr(msg["From"])[1]
+                        if EmailAgentService._should_ignore_sender(from_email):
+                            continue
                         
                         # Get body
                         body = ""
@@ -127,7 +155,7 @@ class EmailAgentService:
             hotel = result.scalar_one_or_none()
 
             if not hotel:
-                logger.warning(f"📩 EmailAgent: Owner not found: {sender_email}")
+                logger.debug(f"📩 EmailAgent: Owner not found, skipping sender: {sender_email}")
                 return
 
             # 2. Extract Hidden Hotel ID
