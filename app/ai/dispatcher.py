@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.audit_log import AuditLog
 from app.services.availability import AvailabilityService
 from app.services.reservation import ReservationService
-from app.services.expense import ExpenseService
 from app.services.report import ReportService
 from app.services.guest_request import GuestRequestService
 from app.services.complaint import ComplaintService
@@ -52,9 +51,6 @@ async def dispatch_intent(
         elif intent == "reject_reservation" and is_owner:
             return await _handle_reject_reservation(db, hotel_id, data, sender_phone)
 
-        elif intent == "add_expense" and is_owner:
-            return await _handle_add_expense(db, hotel_id, data)
-
         elif intent == "get_report" and is_owner:
             return await _handle_get_report(db, hotel_id, data)
 
@@ -85,7 +81,7 @@ async def dispatch_intent(
 
         else:
             # Owner-only intent sent by non-owner
-            if intent in ("approve_reservation", "reject_reservation", "add_expense", "get_report"):
+            if intent in ("approve_reservation", "reject_reservation", "get_report"):
                 return {
                     "response": "عذراً، هالخدمة متاحة لمدير الفندق بس.",
                 }
@@ -145,20 +141,19 @@ async def _handle_create_reservation(
     check_in = _parse_date(data.get("check_in", ""))
     check_out = _parse_date(data.get("check_out", ""))
     guest_name = data.get("guest_name", "")
-    nationality = data.get("nationality", "")
-    id_number = data.get("id_number", "")
+    nationality = (data.get("nationality") or "").strip()
+    id_number = (data.get("id_number") or "").strip()
     phone = data.get("phone", "") or sender_phone
 
     logger.info(f"[CREATE_RESERVATION] raw data from AI: {data}")
     logger.info(f"[CREATE_RESERVATION] parsed: room_type='{room_type}', check_in={check_in}, check_out={check_out}")
 
-    if not room_type or not check_in or not check_out or not guest_name or not nationality:
+    if not room_type or not check_in or not check_out or not guest_name:
         missing = []
         if not room_type: missing.append("نوع الغرفة")
         if not check_in: missing.append("تاريخ الدخول")
         if not check_out: missing.append("تاريخ الخروج")
         if not guest_name: missing.append("اسمك الكريم")
-        if not nationality: missing.append("جنسيتك")
         return {
             "response": f"عشان أسجل حجزك، نحتاج الله يعافيك: {'، '.join(missing)}. "
                         "ياليت تزودني بهالبيانات.",
@@ -203,9 +198,10 @@ async def _handle_create_reservation(
         )
         
         # Notify owner
+        guest_label = f"{guest_name} ({nationality})" if nationality else guest_name
         owner_msg = (
             f"✅ *طلب حجز جديد*\n\n"
-            f"👤 الضيف: {guest_name} ({nationality})\n"
+            f"👤 الضيف: {guest_label}\n"
             f"📱 الجوال: {phone}\n"
             f"🏨 الغرفة: {room_val}\n"
             f"📅 {date_str}\n"
@@ -381,30 +377,6 @@ async def _handle_reject_reservation(
         return {"response": f"❌ {result['message']}"}
 
 
-async def _handle_add_expense(
-    db: AsyncSession, hotel_id: uuid.UUID, data: dict
-) -> dict:
-    amount = data.get("amount", 0)
-    category = data.get("category", "")
-    description = data.get("description", "")
-
-    if not amount or not category:
-        return {"response": "ياليت تعطيني تفاصيل أكثر (المبلغ ونوع المصروف)."}
-
-    expense = await ExpenseService.add_expense(
-        db, hotel_id,
-        amount=float(amount),
-        category=category,
-        description=description or None,
-    )
-    return {
-        "response": f"✅ *تم تسجيل المصروف*\n\n"
-                    f"💰 المبلغ: {float(expense.amount)} ريال\n"
-                    f"📂 النوع: {expense.category}\n"
-                    f"📅 التاريخ: {expense.expense_date}",
-    }
-
-
 async def _handle_unknown(db: AsyncSession, hotel_id: uuid.UUID, data: dict) -> dict:
     return {
         "response": "🤖 لم أفهم طلبك بشكل واضح\nممكن توضح أكثر؟ 🙏"
@@ -428,8 +400,7 @@ async def _handle_get_report(
             f"📊 *تقرير {report_name_ar} لحالتك المالية*\n"
             f"📅 {report['period_start']} → {report['period_end']}\n\n"
             f"💰 الدخل: {d['total_income']} ريال\n"
-            f"💸 المصروفات: {d['total_expenses']} ريال\n"
-            f"📈 صافي الأرباح: {d['net_profit']} ريال\n"
+            f"📈 صافي الإيراد: {d['net_profit']} ريال\n"
             f"🏨 إجمالي الحجوزات: {d['reservations_count']}\n"
             f"📊 نسبة الإشغال: {d['occupancy_rate']}%"
         ),

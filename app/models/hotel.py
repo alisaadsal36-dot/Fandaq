@@ -65,7 +65,6 @@ class Hotel(Base):
     rooms = relationship("Room", back_populates="hotel", cascade="all, delete-orphan")
     guests = relationship("Guest", back_populates="hotel", cascade="all, delete-orphan")
     reservations = relationship("Reservation", back_populates="hotel", cascade="all, delete-orphan")
-    expenses = relationship("Expense", back_populates="hotel", cascade="all, delete-orphan")
     complaints = relationship("Complaint", back_populates="hotel", cascade="all, delete-orphan")
     guest_requests = relationship("GuestRequest", back_populates="hotel", cascade="all, delete-orphan")
     whatsapp_sessions = relationship("WhatsAppSession", back_populates="hotel", cascade="all, delete-orphan")

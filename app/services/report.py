@@ -10,13 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.models.complaint import Complaint, ComplaintStatus
-from app.models.expense import Expense
 from app.models.guest_request import GuestRequest, RequestStatus
 from app.models.reservation import Reservation, ReservationStatus
 from app.models.room import Room
 from app.models.room_type import RoomType
 from app.models.user import User, UserRole
-from app.services.expense import ExpenseService
 
 
 class ReportService:
@@ -105,12 +103,6 @@ class ReportService:
         res_count_result = await db.execute(res_count_stmt)
         reservations_count = res_count_result.scalar() or 0
 
-        # ── Expenses ───────────────────────────────────
-        expenses_by_category = await ExpenseService.get_expenses_by_category(
-            db, hotel_id, period_start, period_end
-        )
-        total_expenses = sum(expenses_by_category.values())
-
         # ── Occupancy rate ─────────────────────────────
         total_rooms_stmt = select(func.count(Room.id)).where(
             Room.hotel_id == hotel_id
@@ -128,12 +120,10 @@ class ReportService:
             "period_end": str(period_end),
             "data": {
                 "total_income": total_income,
-                "total_expenses": total_expenses,
-                "net_profit": total_income - total_expenses,
+                "net_profit": total_income,
                 "reservations_count": reservations_count,
                 "occupancy_rate": round(occupancy_rate, 2),
                 "income_by_room_type": income_by_room_type,
-                "expenses_by_category": expenses_by_category,
             },
         }
 

@@ -7,7 +7,6 @@ from app.models.room_type import RoomType
 from app.models.room import Room, RoomStatus
 from app.models.guest import Guest
 from app.models.reservation import Reservation, ReservationStatus
-from app.models.expense import Expense
 from app.models.complaint import Complaint, ComplaintStatus
 from app.models.guest_request import GuestRequest, RequestStatus
 from app.models.whatsapp_session import WhatsAppSession
@@ -17,6 +16,7 @@ from app.models.review import Review
 from app.models.daily_pricing import DailyPricing
 from app.models.competitor import Competitor
 from app.models.user import User, UserRole
+from app.models.employee_evaluation import EmployeeEvaluation, EvaluationStatus
 
 __all__ = [
     "Hotel",
@@ -26,7 +26,6 @@ __all__ = [
     "Guest",
     "Reservation",
     "ReservationStatus",
-    "Expense",
     "Complaint",
     "ComplaintStatus",
     "GuestRequest",
@@ -37,4 +36,6 @@ __all__ = [
     "Competitor",
     "User",
     "UserRole",
+    "EmployeeEvaluation",
+    "EvaluationStatus",
 ]

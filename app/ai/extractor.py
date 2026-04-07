@@ -28,7 +28,6 @@ async def extract_intent(
     hotel_name: str = "",
     guest_name: str | None = None,
     guest_nationality: str | None = None,
-    guest_id_number: str | None = None,
     guest_room_number: str | None = None,
 ) -> dict:
     """
@@ -38,7 +37,7 @@ async def extract_intent(
         dict with 'response', 'intent' and 'data' keys.
         On failure, returns fallback response.
     """
-    system_prompt = get_system_prompt(current_date, hotel_room_types, hotel_name, guest_name, guest_nationality, guest_id_number, guest_room_number)
+    system_prompt = get_system_prompt(current_date, hotel_room_types, hotel_name, guest_name, guest_nationality, guest_room_number=guest_room_number)
 
     try:
         messages = [{"role": "system", "content": system_prompt}]

@@ -2,14 +2,19 @@
 //  PAGE: STAFF PERFORMANCE
 // ══════════════════════════════════════════════
 let staffPerfDays = 30;
+let STAFF_EVALUATIONS = [];
 
 async function loadStaffPerformance() {
   if (!HOTEL_ID) return;
 
   document.getElementById('content').innerHTML = '<div class="loading"><div class="spinner"></div> جاري تحميل تقييم الموظفين...</div>';
 
-  const data = await apiFetch(`/hotels/${HOTEL_ID}/reports/staff-performance?days=${staffPerfDays}`)
-    .catch(() => ({ summary: null, leaderboard: [] }));
+  const [data, evalData, eligibleData] = await Promise.all([
+    apiFetch(`/hotels/${HOTEL_ID}/reports/staff-performance?days=${staffPerfDays}`)
+      .catch(() => ({ summary: null, leaderboard: [] })),
+    apiFetch(`/hotels/${HOTEL_ID}/employee-evaluations`).catch(() => ({ evaluations: [] })),
+    apiFetch(`/hotels/${HOTEL_ID}/employee-evaluations/eligible-employees`).catch(() => ({ users: [] })),
+  ]);
 
   const summary = data.summary || {
     total_staff: 0,
@@ -27,6 +32,12 @@ async function loadStaffPerformance() {
     sla_resolution_target_hours: 4,
   };
   const leaderboard = data.leaderboard || [];
+  const evaluations = evalData.evaluations || [];
+  STAFF_EVALUATIONS = evaluations;
+  const eligibleEmployees = (eligibleData.users || []).filter(u => u.role === 'employee' || u.role === 'supervisor');
+
+  const canSubmitSurvey = CURRENT_USER && CURRENT_USER.role === 'supervisor';
+  const canReviewSurvey = CURRENT_USER && CURRENT_USER.role === 'admin';
 
   document.getElementById('content').innerHTML = `
     <div class="filter-bar" style="justify-content:space-between;align-items:center;margin-bottom:16px">
@@ -135,7 +146,205 @@ async function loadStaffPerformance() {
         </tbody>
       </table>
     </div>
+
+    <div class="table-card" style="margin-top:16px;padding:16px">
+      <div class="table-header" style="margin-bottom:12px">
+        <div>
+          <h3>📝 استبيان تقييم الموظفين</h3>
+          <span style="color:var(--muted);font-size:12px">يعبّيه المشرف ويرفعه للإدارة للمراجعة</span>
+        </div>
+      </div>
+
+      ${canSubmitSurvey ? renderEvaluationForm(eligibleEmployees) : '<div class="empty-state" style="margin-bottom:12px">نموذج التقييم متاح للمشرف فقط.</div>'}
+
+      <div style="margin-top:16px">
+        <h4 style="margin:0 0 8px 0">📨 التقييمات المرفوعة</h4>
+        ${renderEvaluationsTable(evaluations, canReviewSurvey)}
+      </div>
+    </div>
   `;
+}
+
+function renderEvaluationForm(eligibleEmployees) {
+  const options = eligibleEmployees.map(u => `<option value="${u.id}">${u.full_name} (${u.role === 'supervisor' ? 'مشرف' : 'موظف'})</option>`).join('');
+  const today = new Date().toISOString().split('T')[0];
+  const monthAgoDate = new Date();
+  monthAgoDate.setDate(monthAgoDate.getDate() - 30);
+  const monthAgo = monthAgoDate.toISOString().split('T')[0];
+
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;align-items:end">
+      <div class="form-group"><label>الموظف</label><select id="eval-employee" class="input">${options || '<option value="">لا يوجد موظفون</option>'}</select></div>
+      <div class="form-group"><label>بداية الفترة</label><input id="eval-period-start" class="input" type="date" value="${monthAgo}"></div>
+      <div class="form-group"><label>نهاية الفترة</label><input id="eval-period-end" class="input" type="date" value="${today}"></div>
+      <div class="form-group"><label>الالتزام (1-5)</label><input id="eval-commitment" class="input" type="number" min="1" max="5" value="4"></div>
+      <div class="form-group"><label>السرعة (1-5)</label><input id="eval-speed" class="input" type="number" min="1" max="5" value="4"></div>
+      <div class="form-group"><label>التعامل (1-5)</label><input id="eval-communication" class="input" type="number" min="1" max="5" value="4"></div>
+      <div class="form-group"><label>الجودة (1-5)</label><input id="eval-quality" class="input" type="number" min="1" max="5" value="4"></div>
+      <div class="form-group" style="grid-column:1/-1"><label>نقاط القوة</label><textarea id="eval-strengths" class="input" rows="3" style="min-height:92px;resize:vertical" placeholder="اكتب أبرز نقاط القوة"></textarea></div>
+      <div class="form-group" style="grid-column:1/-1"><label>فرص التحسين</label><textarea id="eval-improvements" class="input" rows="3" style="min-height:92px;resize:vertical" placeholder="اكتب فرص التحسين"></textarea></div>
+      <div class="form-group" style="grid-column:1/-1"><label>ملاحظات المشرف</label><textarea id="eval-notes" class="input" rows="3" style="min-height:92px;resize:vertical" placeholder="ملاحظات إضافية للإدارة"></textarea></div>
+    </div>
+    <div style="margin-top:10px;display:flex;justify-content:flex-start">
+      <button class="btn btn-primary" onclick="submitEmployeeEvaluation()">⬆️ رفع التقييم للإدارة</button>
+    </div>
+  `;
+}
+
+function renderEvaluationsTable(evaluations, canReviewSurvey) {
+  if (!evaluations.length) {
+    return '<div class="empty-state"><div class="emoji">📭</div>لا توجد تقييمات مرفوعة بعد</div>';
+  }
+
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>الموظف</th>
+          <th>المشرف</th>
+          <th>الفترة</th>
+          <th>الدرجات</th>
+          <th>الحالة</th>
+          <th>ملاحظات</th>
+          <th>الإجراء</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${evaluations.map(ev => {
+          const statusMap = {
+            submitted: '<span class="badge" style="background:rgba(245,158,11,.2);color:#f59e0b;border:1px solid rgba(245,158,11,.35)">مرفوع</span>',
+            approved: '<span class="badge" style="background:rgba(16,185,129,.2);color:#34d399;border:1px solid rgba(16,185,129,.35)">معتمد</span>',
+            needs_improvement: '<span class="badge" style="background:rgba(239,68,68,.2);color:#f87171;border:1px solid rgba(239,68,68,.35)">يحتاج تحسين</span>'
+          };
+          const scoreText = `التزام ${ev.commitment_score} | سرعة ${ev.speed_score} | تعامل ${ev.communication_score} | جودة ${ev.quality_score}`;
+          const notes = [ev.strengths, ev.improvement_areas, ev.supervisor_notes, ev.admin_notes].filter(Boolean).join(' | ');
+          const actionButtons = [
+            `<button class="btn btn-sm btn-primary" onclick="openEvaluationPdf('${ev.id}')">📄 PDF</button>`
+          ];
+          if (canReviewSurvey && ev.status === 'submitted') {
+            actionButtons.push(`<button class="btn btn-sm" style="background:#10b981" onclick="openEvaluationReview('${ev.id}')">مراجعة</button>`);
+          }
+          return `<tr>
+            <td><strong>${ev.employee_name}</strong></td>
+            <td>${ev.supervisor_name}</td>
+            <td>${ev.period_start} → ${ev.period_end}</td>
+            <td>${scoreText}</td>
+            <td>${statusMap[ev.status] || ev.status}</td>
+            <td style="max-width:320px">${notes || '—'}</td>
+            <td><div style="display:flex;gap:6px;flex-wrap:wrap">${actionButtons.join('')}</div></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+function openEvaluationPdf(evaluationId) {
+  const ev = (STAFF_EVALUATIONS || []).find(x => String(x.id) === String(evaluationId));
+  if (!ev) {
+    showToast('تعذر العثور على بيانات التقييم', 'error');
+    return;
+  }
+
+  const statusMap = {
+    submitted: 'مرفوع',
+    approved: 'معتمد',
+    needs_improvement: 'يحتاج تحسين'
+  };
+
+  const safe = (v) => String(v || '—')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+
+  const avgScore = ((Number(ev.commitment_score || 0) + Number(ev.speed_score || 0) + Number(ev.communication_score || 0) + Number(ev.quality_score || 0)) / 4).toFixed(2);
+  const title = `تقييم موظف - ${safe(ev.employee_name)}`;
+
+  const html = `
+    <!doctype html>
+    <html lang="ar" dir="rtl">
+    <head>
+      <meta charset="utf-8" />
+      <title>${title}</title>
+      <style>
+        body { font-family: Tahoma, Arial, sans-serif; margin: 24px; color: #111; }
+        h1 { margin: 0 0 10px; font-size: 22px; }
+        .meta { margin-bottom: 18px; color: #333; font-size: 14px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+        th, td { border: 1px solid #d0d7de; padding: 10px; text-align: right; vertical-align: top; }
+        th { background: #f3f4f6; }
+        .section { margin-top: 14px; }
+        .label { font-weight: 700; margin-bottom: 6px; }
+        .box { border: 1px solid #d0d7de; padding: 10px; min-height: 42px; }
+      </style>
+    </head>
+    <body>
+      <h1>نموذج تقييم موظف</h1>
+      <div class="meta">
+        الموظف: <strong>${safe(ev.employee_name)}</strong> | المشرف: <strong>${safe(ev.supervisor_name)}</strong><br/>
+        الفترة: <strong>${safe(ev.period_start)} → ${safe(ev.period_end)}</strong> | الحالة: <strong>${safe(statusMap[ev.status] || ev.status)}</strong><br/>
+        تاريخ الرفع: <strong>${safe(ev.submitted_at)}</strong>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>الالتزام</th>
+            <th>السرعة</th>
+            <th>التعامل</th>
+            <th>الجودة</th>
+            <th>المتوسط</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>${safe(ev.commitment_score)}</td>
+            <td>${safe(ev.speed_score)}</td>
+            <td>${safe(ev.communication_score)}</td>
+            <td>${safe(ev.quality_score)}</td>
+            <td>${safe(avgScore)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="section">
+        <div class="label">نقاط القوة</div>
+        <div class="box">${safe(ev.strengths)}</div>
+      </div>
+
+      <div class="section">
+        <div class="label">فرص التحسين</div>
+        <div class="box">${safe(ev.improvement_areas)}</div>
+      </div>
+
+      <div class="section">
+        <div class="label">ملاحظات المشرف</div>
+        <div class="box">${safe(ev.supervisor_notes)}</div>
+      </div>
+
+      <div class="section">
+        <div class="label">ملاحظات الإدارة</div>
+        <div class="box">${safe(ev.admin_notes)}</div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    showToast('المتصفح منع فتح نافذة PDF', 'error');
+    return;
+  }
+
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+  printWindow.focus();
+  setTimeout(() => {
+    printWindow.print();
+  }, 250);
 }
 
 function renderStaffLeaderboardRows(rows) {
@@ -204,4 +413,89 @@ function exportStaffPerformanceExcel() {
       window.URL.revokeObjectURL(url);
     })
     .catch(() => showToast('فشل تصدير التقرير', 'error'));
+}
+
+async function submitEmployeeEvaluation() {
+  const employee_user_id = document.getElementById('eval-employee')?.value;
+  const period_start = document.getElementById('eval-period-start')?.value;
+  const period_end = document.getElementById('eval-period-end')?.value;
+  const commitment_score = Number(document.getElementById('eval-commitment')?.value || 0);
+  const speed_score = Number(document.getElementById('eval-speed')?.value || 0);
+  const communication_score = Number(document.getElementById('eval-communication')?.value || 0);
+  const quality_score = Number(document.getElementById('eval-quality')?.value || 0);
+  const strengths = (document.getElementById('eval-strengths')?.value || '').trim();
+  const improvement_areas = (document.getElementById('eval-improvements')?.value || '').trim();
+  const supervisor_notes = (document.getElementById('eval-notes')?.value || '').trim();
+
+  if (!employee_user_id || !period_start || !period_end) {
+    showToast('يرجى تعبئة الموظف والفترة', 'error');
+    return;
+  }
+  const scores = [commitment_score, speed_score, communication_score, quality_score];
+  if (scores.some(s => s < 1 || s > 5)) {
+    showToast('جميع الدرجات يجب أن تكون من 1 إلى 5', 'error');
+    return;
+  }
+
+  try {
+    await apiFetch(`/hotels/${HOTEL_ID}/employee-evaluations`, {
+      method: 'POST',
+      body: JSON.stringify({
+        employee_user_id,
+        period_start,
+        period_end,
+        commitment_score,
+        speed_score,
+        communication_score,
+        quality_score,
+        strengths: strengths || null,
+        improvement_areas: improvement_areas || null,
+        supervisor_notes: supervisor_notes || null,
+      })
+    });
+    showToast('تم رفع التقييم للإدارة بنجاح');
+    await loadStaffPerformance();
+  } catch (e) {
+    showToast('فشل رفع التقييم', 'error');
+  }
+}
+
+function openEvaluationReview(evaluationId) {
+  const body = `
+    <div style="display:grid;grid-template-columns:1fr;gap:12px">
+      <div class="form-group" style="margin-bottom:0">
+        <label>قرار الإدارة</label>
+        <select id="eval-review-status" class="input">
+          <option value="approved">اعتماد</option>
+          <option value="needs_improvement">يحتاج تحسين</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>ملاحظات الإدارة</label>
+        <textarea id="eval-review-notes" class="input" rows="4" style="min-height:120px;resize:vertical" placeholder="اكتب ملاحظات واضحة للإجراء القادم"></textarea>
+      </div>
+      <div style="font-size:12px;color:var(--muted)">سيتم إشعار المشرف بقرار الإدارة والملاحظات.</div>
+    </div>
+  `;
+  const foot = `
+    <button class="btn btn-secondary" onclick="closeModal()">إلغاء</button>
+    <button class="btn btn-primary" onclick="reviewEmployeeEvaluation('${evaluationId}')">حفظ المراجعة</button>
+  `;
+  openModal('مراجعة تقييم موظف', body, foot);
+}
+
+async function reviewEmployeeEvaluation(evaluationId) {
+  const status = document.getElementById('eval-review-status')?.value;
+  const admin_notes = (document.getElementById('eval-review-notes')?.value || '').trim();
+  try {
+    await apiFetch(`/hotels/${HOTEL_ID}/employee-evaluations/${evaluationId}/review`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, admin_notes: admin_notes || null })
+    });
+    closeModal();
+    showToast('تمت مراجعة التقييم');
+    await loadStaffPerformance();
+  } catch (e) {
+    showToast('فشل مراجعة التقييم', 'error');
+  }
 }

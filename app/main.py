@@ -13,7 +13,6 @@ from app.api.webhook import router as webhook_router
 from app.api.v1.hotels import router as hotels_router
 from app.api.v1.rooms import router as rooms_router
 from app.api.v1.reservations import router as reservations_router
-from app.api.v1.expenses import router as expenses_router
 from app.api.v1.reports import router as reports_router
 from app.api.v1.complaints import router as complaints_router
 from app.api.v1.guest_requests import router as guest_requests_router
@@ -22,6 +21,7 @@ from app.api.v1.reviews import router as reviews_router
 from app.api.v1.daily_pricing import router as daily_pricing_router
 from app.api.v1.competitors import router as competitors_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.employee_evaluations import router as employee_evaluations_router
 
 settings = get_settings()
 
@@ -86,7 +86,6 @@ app.include_router(auth_router, prefix=prefix, tags=["Authentication"])
 app.include_router(hotels_router, prefix=prefix, tags=["Hotels"])
 app.include_router(rooms_router, prefix=prefix, tags=["Rooms"])
 app.include_router(reservations_router, prefix=prefix, tags=["Reservations"])
-app.include_router(expenses_router, prefix=prefix, tags=["Expenses"])
 app.include_router(reports_router, prefix=prefix, tags=["Reports"])
 app.include_router(daily_pricing_router, prefix=prefix, tags=["Daily Pricing"])
 app.include_router(competitors_router, prefix=prefix, tags=["Competitors"])
@@ -94,6 +93,7 @@ app.include_router(complaints_router, prefix=prefix, tags=["Complaints"])
 app.include_router(guest_requests_router, prefix=prefix, tags=["Guest Requests"])
 app.include_router(guests_router, prefix=prefix, tags=["Guests"])
 app.include_router(reviews_router, prefix=prefix, tags=["Reviews"])
+app.include_router(employee_evaluations_router, prefix=prefix, tags=["Employee Evaluations"])
 
 
 @app.get("/health", tags=["Health"])

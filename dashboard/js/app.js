@@ -70,7 +70,6 @@ function switchHotel(newId) {
   GLOBAL_DATA.all_comps = [];
   GLOBAL_DATA.all_reqs = [];
   GLOBAL_DATA.all_types = [];
-  GLOBAL_DATA.all_exps = [];
 
   // Reload room types for new hotel
   fetch(`${API}/hotels/${HOTEL_ID}/room-types`).then(r => r.json()).then(rtData => {
@@ -163,7 +162,7 @@ async function loadBadges() {
 const pageTitles = {
   overview: 'الرئيسية', reservations: 'الحجوزات',
   rooms: 'الغرف', reports: 'التقارير المالية', complaints: 'الشكاوى والطلبات',
-  hotels: 'الفنادق', roomsetup: 'إعداد الغرف', expenses: 'المصروفات',
+  hotels: 'الفنادق', roomsetup: 'إعداد الغرف',
   guests: 'الضيوف', reviews: 'التقييمات', dailypricing: 'التسعير اليومي',
   users: 'الإدارة والموظفين', staffperformance: 'تقييم الموظفين', settings: 'الإعدادات'
 };
@@ -205,7 +204,7 @@ function nav(page) {
   const fns = {
     overview: loadOverview, reservations: loadReservations,
     rooms: loadRooms, reports: loadReports, complaints: loadComplaints,
-    hotels: loadHotels, roomsetup: loadRoomSetup, expenses: loadExpenses,
+    hotels: loadHotels, roomsetup: loadRoomSetup,
     guests: loadGuests, reviews: loadReviews, dailypricing: loadDailyPricing,
     users: loadUsers, staffperformance: loadStaffPerformance, settings: loadSettings
   };

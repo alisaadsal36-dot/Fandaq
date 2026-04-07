@@ -22,12 +22,10 @@ class ReportResponse(BaseModel):
 
 class FinancialSummary(BaseModel):
     total_income: float
-    total_expenses: float
     net_profit: float
     reservations_count: int
     occupancy_rate: float
     income_by_room_type: dict[str, float]
-    expenses_by_category: dict[str, float]
 
 
 class StaffPerformanceEntry(BaseModel):

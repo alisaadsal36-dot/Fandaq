@@ -85,6 +85,36 @@ class ComplaintService:
         return complaint
 
     @staticmethod
+    async def assign_complaint(
+        db: AsyncSession,
+        hotel_id: uuid.UUID,
+        complaint_id: uuid.UUID,
+        assigned_to_user: User,
+    ) -> Complaint | None:
+        """Assign complaint to a resolver (employee/supervisor) by hotel supervisor/admin."""
+        from sqlalchemy.orm import joinedload
+
+        stmt = select(Complaint).options(joinedload(Complaint.guest)).where(
+            Complaint.id == complaint_id,
+            Complaint.hotel_id == hotel_id,
+        )
+        complaint = (await db.execute(stmt)).scalar_one_or_none()
+        if not complaint:
+            return None
+
+        complaint.assigned_to_user_id = assigned_to_user.id
+        complaint.assigned_to_name = assigned_to_user.full_name
+        complaint.assigned_at = datetime.utcnow()
+
+        if complaint.status == ComplaintStatus.OPEN:
+            complaint.status = ComplaintStatus.IN_PROGRESS
+            if not complaint.acknowledged_at:
+                complaint.acknowledged_at = datetime.utcnow()
+
+        await db.flush()
+        return complaint
+
+    @staticmethod
     async def list_complaints(
         db: AsyncSession,
         hotel_id: uuid.UUID,

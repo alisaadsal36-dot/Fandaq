@@ -14,6 +14,7 @@ from app.models.user import User, UserRole
 from app.schemas.complaint import (
     ComplaintCreate, ComplaintResponse,
     ComplaintStatusUpdate, ComplaintListResponse,
+    ComplaintAssignRequest, AssignableStaffItem, AssignableStaffResponse,
 )
 from app.services.complaint import ComplaintService
 
@@ -52,6 +53,34 @@ async def list_complaints(
         db, hotel_id, status=status, skip=skip, limit=limit
     )
     return result
+
+
+@router.get(
+    "/hotels/{hotel_id}/assignable-staff",
+    response_model=AssignableStaffResponse,
+)
+async def list_assignable_staff(
+    hotel_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_role_for_hotel(UserRole.ADMIN, UserRole.SUPERVISOR, UserRole.EMPLOYEE)),
+):
+    """List assignable staff in the hotel for complaint/request assignment."""
+    from sqlalchemy import select
+
+    rows = (await db.execute(
+        select(User).where(
+            User.hotel_id == hotel_id,
+            User.is_active == True,
+            User.role.in_([UserRole.SUPERVISOR, UserRole.EMPLOYEE]),
+        ).order_by(User.role.asc(), User.full_name.asc())
+    )).scalars().all()
+
+    return AssignableStaffResponse(
+        users=[
+            AssignableStaffItem(id=u.id, full_name=u.full_name, role=u.role.value)
+            for u in rows
+        ]
+    )
 
 
 @router.patch(
@@ -129,4 +158,44 @@ async def update_complaint_status(
             # Log error but don't fail the API request
             print(f"Failed to send AI apology message: {e}")
             
+    return complaint
+
+
+@router.patch(
+    "/hotels/{hotel_id}/complaints/{complaint_id}/assign",
+    response_model=ComplaintResponse,
+)
+async def assign_complaint(
+    hotel_id: uuid.UUID,
+    complaint_id: uuid.UUID,
+    data: ComplaintAssignRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_role_for_hotel(UserRole.ADMIN, UserRole.SUPERVISOR)),
+):
+    """Assign complaint to a resolver (supervisor/admin only)."""
+    from sqlalchemy import select
+
+    assigned_to = (await db.execute(
+        select(User).where(
+            User.id == data.assigned_to_user_id,
+            User.hotel_id == hotel_id,
+            User.is_active == True,
+            User.role.in_([UserRole.SUPERVISOR, UserRole.EMPLOYEE]),
+        )
+    )).scalar_one_or_none()
+    if not assigned_to:
+        raise HTTPException(status_code=404, detail="Assigned user not found in this hotel")
+
+    complaint = await ComplaintService.assign_complaint(
+        db=db,
+        hotel_id=hotel_id,
+        complaint_id=complaint_id,
+        assigned_to_user=assigned_to,
+    )
+    if not complaint:
+        raise HTTPException(status_code=404, detail="Complaint not found")
+
+    complaint.guest_name = complaint.guest.name if complaint.guest else None
+    complaint.guest_phone = complaint.guest.phone if complaint.guest else None
+    complaint.room_number = None
     return complaint

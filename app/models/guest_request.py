@@ -6,7 +6,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, func
+from sqlalchemy import DateTime, Enum, ForeignKey, JSON, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -53,6 +53,26 @@ class GuestRequest(Base):
     first_response_by_name: Mapped[str | None] = mapped_column(
         String(255), nullable=True,
         comment="Snapshot name of first responder"
+    )
+    assigned_to_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+        comment="User assigned by supervisor/admin to execute this request"
+    )
+    assigned_to_name: Mapped[str | None] = mapped_column(
+        String(255), nullable=True,
+        comment="Snapshot name of assigned executor"
+    )
+    assigned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    fulfillment_status: Mapped[str | None] = mapped_column(
+        String(30), nullable=True,
+        comment="pending, partial, completed, failed"
+    )
+    fulfillment_details: Mapped[list[dict]] = mapped_column(
+        JSON, nullable=False, default=list,
+        comment="Timeline of fulfillment steps"
     )
     completed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"),

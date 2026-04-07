@@ -7,7 +7,6 @@ async function loadReports() {
   const data = await apiFetch(`/hotels/${HOTEL_ID}/reports/${reportType}`).catch(() => null);
   const d = data?.data || {};
   const incomeByType = d.income_by_room_type || {};
-  const expByCat = d.expenses_by_category || {};
   const COLORS = ['#7c3aed', '#2563eb', '#10b981', '#f59e0b', '#ef4444'];
 
   destroyCharts();
@@ -23,8 +22,6 @@ async function loadReports() {
     <div class="kpi-grid">
       <div class="kpi-card green"><div class="kpi-icon">💰</div><div class="kpi-label">إجمالي الدخل</div>
         <div class="kpi-value">${fmtMoney(d.total_income)}</div></div>
-      <div class="kpi-card red"><div class="kpi-icon">💸</div><div class="kpi-label">إجمالي المصروفات</div>
-        <div class="kpi-value">${fmtMoney(d.total_expenses)}</div></div>
       <div class="kpi-card purple"><div class="kpi-icon">📈</div><div class="kpi-label">صافي الربح</div>
         <div class="kpi-value" style="color:${d.net_profit >= 0 ? 'var(--success)' : 'var(--danger)'}">${fmtMoney(d.net_profit)}</div></div>
       <div class="kpi-card blue"><div class="kpi-icon">📊</div><div class="kpi-label">نسبة الإشغال</div>
@@ -33,12 +30,9 @@ async function loadReports() {
     <div class="charts-grid">
       <div class="chart-card"><h3>🏨 الدخل بنوع الغرفة</h3>
         <div class="chart-wrap"><canvas id="chart-rtype"></canvas></div></div>
-      <div class="chart-card"><h3>💸 المصروفات بالفئة</h3>
-        <div class="chart-wrap"><canvas id="chart-rexp"></canvas></div></div>
     </div>`;
 
   const tl = Object.keys(incomeByType).map(roomTypeLabel); const tv = Object.values(incomeByType);
-  const cl = Object.keys(expByCat); const cv = Object.values(expByCat);
   if (tl.length) charts.rtype = new Chart(document.getElementById('chart-rtype'), {
     type: 'doughnut', data: {
       labels: tl, datasets: [{
@@ -52,21 +46,6 @@ async function loadReports() {
           position: 'bottom',
           labels: { color: '#8b949e', font: { family: 'IBM Plex Sans Arabic', size: 11 }, padding: 12 }
         }
-      }
-    }
-  });
-  if (cl.length) charts.rexp = new Chart(document.getElementById('chart-rexp'), {
-    type: 'bar', data: {
-      labels: cl, datasets: [{
-        data: cv, backgroundColor: 'rgba(239,68,68,.6)',
-        borderColor: '#ef4444', borderWidth: 1, borderRadius: 6
-      }]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { color: '#8b949e', font: { family: 'IBM Plex Sans Arabic' } }, grid: { display: false } },
-        y: { ticks: { color: '#8b949e', font: { family: 'IBM Plex Sans Arabic' } }, grid: { color: 'rgba(48,54,61,.5)' } }
       }
     }
   });

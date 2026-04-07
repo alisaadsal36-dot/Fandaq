@@ -23,8 +23,6 @@ async function loadOverview() {
     <div class="charts-grid">
       <div class="chart-card"><h3>📈 توزيع الدخل بنوع الغرفة</h3>
         <div class="chart-wrap" id="wrap-income"><div class="loading-text">جاري تحميل البيانات...</div><canvas id="chart-income-type"></canvas></div></div>
-      <div class="chart-card"><h3>💸 المصروفات بالفئة</h3>
-        <div class="chart-wrap" id="wrap-exp"><div class="loading-text">جاري تحميل البيانات...</div><canvas id="chart-expenses"></canvas></div></div>
     </div>
     <div class="table-card">
       <div class="table-header"><h3>🕐 آخر الحجوزات</h3>
@@ -86,36 +84,12 @@ async function loadOverview() {
       }
     } else { if (w1) w1.innerHTML = '<div class="empty-state"><div class="emoji">📊</div>لا توجد بيانات</div>'; }
 
-    const ebc = md.expenses_by_category || {};
-    const cL = Object.keys(ebc);
-    const cV = Object.values(ebc).map(v => Number(v) || 0);
-    const w2 = document.getElementById('wrap-exp');
-    if (w2) w2.querySelector('.loading-text')?.remove();
-    if (cL.length > 0) {
-      try {
-        if (typeof Chart === 'undefined') throw new Error('Chart.js not loaded');
-        charts.expenses = new Chart(document.getElementById('chart-expenses'), {
-          type: 'bar', data: { labels: cL, datasets: [{ data: cV, backgroundColor: 'rgba(239,68,68,.6)', borderColor: 'rgba(239,68,68,1)', borderWidth: 1, borderRadius: 6 }] },
-          options: {
-            responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
-            scales: {
-              x: { ticks: { color: '#8b949e', font: { family: 'IBM Plex Sans Arabic' } }, grid: { color: 'rgba(48,54,61,.5)' } },
-              y: { ticks: { color: '#8b949e', font: { family: 'IBM Plex Sans Arabic' } }, grid: { color: 'rgba(48,54,61,.5)' } }
-            }
-          }
-        });
-      } catch (e) {
-        renderFallbackList(w2, cL, cV, 'linear-gradient(90deg,#ef4444,#f59e0b)');
-      }
-    } else { if (w2) w2.innerHTML = '<div class="empty-state"><div class="emoji">💸</div>لا توجد مصروفات</div>'; }
   }).catch((err) => {
     const errText = String(err?.message || err || '');
     const permissionDenied = errText.includes('Not enough permissions') || errText.includes('403');
     const msg = permissionDenied ? 'غير متاح حسب الصلاحية' : 'فشل تحميل التقرير';
     const w1 = document.getElementById('wrap-income');
     if (w1) w1.innerHTML = `<div class="empty-state">${msg}</div>`;
-    const w2 = document.getElementById('wrap-exp');
-    if (w2) w2.innerHTML = `<div class="empty-state">${msg}</div>`;
   });
 
   // Background: recent reservations

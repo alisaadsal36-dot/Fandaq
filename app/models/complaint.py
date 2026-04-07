@@ -50,6 +50,18 @@ class Complaint(Base):
         String(255), nullable=True,
         comment="Snapshot name of first responder"
     )
+    assigned_to_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True, index=True,
+        comment="User assigned by supervisor/admin to resolve this complaint"
+    )
+    assigned_to_name: Mapped[str | None] = mapped_column(
+        String(255), nullable=True,
+        comment="Snapshot name of assigned resolver"
+    )
+    assigned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     resolved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True, index=True,

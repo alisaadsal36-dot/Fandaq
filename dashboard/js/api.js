@@ -7,7 +7,7 @@ let currentPage = 'overview';
 let charts = {};
 let ROOM_TYPES = {}; // id -> name map
 let PAGE_CACHE_RENDERED = {};
-let GLOBAL_DATA = { pending_res: [], open_comps: [], all_rooms: [], all_res: [], all_comps: [], all_reqs: [], all_hotels: [], all_types: [], all_exps: [] };
+let GLOBAL_DATA = { pending_res: [], open_comps: [], all_rooms: [], all_res: [], all_comps: [], all_reqs: [], all_hotels: [], all_types: [] };
 let CURRENT_USER = null;
 
 const API_CACHE = new Map();

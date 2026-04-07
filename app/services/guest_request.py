@@ -85,6 +85,91 @@ class GuestRequestService:
         return request
 
     @staticmethod
+    async def assign_request(
+        db: AsyncSession,
+        hotel_id: uuid.UUID,
+        request_id: uuid.UUID,
+        assigned_to_user: User,
+    ) -> GuestRequest | None:
+        """Assign request to a staff member and move to in-progress when needed."""
+        stmt = select(GuestRequest).where(
+            GuestRequest.id == request_id,
+            GuestRequest.hotel_id == hotel_id,
+        )
+        request = (await db.execute(stmt)).scalar_one_or_none()
+        if not request:
+            return None
+
+        request.assigned_to_user_id = assigned_to_user.id
+        request.assigned_to_name = assigned_to_user.full_name
+        request.assigned_at = datetime.utcnow()
+
+        if request.status == RequestStatus.OPEN:
+            request.status = RequestStatus.IN_PROGRESS
+            if not request.acknowledged_at:
+                request.acknowledged_at = datetime.utcnow()
+
+        await db.flush()
+        return request
+
+    @staticmethod
+    async def add_fulfillment_detail(
+        db: AsyncSession,
+        hotel_id: uuid.UUID,
+        request_id: uuid.UUID,
+        item: str,
+        detail_status: str,
+        actor_user: User,
+        notes: str | None = None,
+    ) -> GuestRequest | None:
+        """Append a fulfillment timeline item such as towel delivered."""
+        stmt = select(GuestRequest).where(
+            GuestRequest.id == request_id,
+            GuestRequest.hotel_id == hotel_id,
+        )
+        request = (await db.execute(stmt)).scalar_one_or_none()
+        if not request:
+            return None
+
+        timeline = list(request.fulfillment_details or [])
+        timeline.append({
+            "timestamp": datetime.utcnow().isoformat(),
+            "item": item,
+            "status": detail_status,
+            "notes": notes,
+            "actor_name": actor_user.full_name,
+        })
+        request.fulfillment_details = timeline
+
+        statuses = [str(x.get("status", "")).lower() for x in timeline]
+        if statuses and all(s == "delivered" for s in statuses):
+            request.fulfillment_status = "completed"
+            request.status = RequestStatus.COMPLETED
+            if not request.completed_at:
+                request.completed_at = datetime.utcnow()
+            request.completed_by_user_id = actor_user.id
+            request.completed_by_name = actor_user.full_name
+        elif any(s == "failed" for s in statuses):
+            request.fulfillment_status = "failed"
+            if request.status == RequestStatus.OPEN:
+                request.status = RequestStatus.IN_PROGRESS
+        elif any(s == "delivered" for s in statuses):
+            request.fulfillment_status = "partial"
+            if request.status == RequestStatus.OPEN:
+                request.status = RequestStatus.IN_PROGRESS
+        else:
+            request.fulfillment_status = "pending"
+
+        if not request.acknowledged_at:
+            request.acknowledged_at = datetime.utcnow()
+        if not request.first_response_by_user_id:
+            request.first_response_by_user_id = actor_user.id
+            request.first_response_by_name = actor_user.full_name
+
+        await db.flush()
+        return request
+
+    @staticmethod
     async def list_requests(
         db: AsyncSession,
         hotel_id: uuid.UUID,

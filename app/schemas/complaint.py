@@ -18,6 +18,10 @@ class ComplaintStatusUpdate(BaseModel):
     status: ComplaintStatus
 
 
+class ComplaintAssignRequest(BaseModel):
+    assigned_to_user_id: uuid.UUID
+
+
 class ComplaintResponse(BaseModel):
     id: uuid.UUID
     hotel_id: uuid.UUID
@@ -27,6 +31,9 @@ class ComplaintResponse(BaseModel):
     room_number: str | None = None
     text: str
     status: ComplaintStatus
+    assigned_to_user_id: uuid.UUID | None = None
+    assigned_to_name: str | None = None
+    assigned_at: datetime | None = None
     acknowledged_at: datetime | None = None
     first_response_by_name: str | None = None
     resolved_by_name: str | None = None
@@ -39,3 +46,13 @@ class ComplaintResponse(BaseModel):
 class ComplaintListResponse(BaseModel):
     complaints: list[ComplaintResponse]
     total: int
+
+
+class AssignableStaffItem(BaseModel):
+    id: uuid.UUID
+    full_name: str
+    role: str
+
+
+class AssignableStaffResponse(BaseModel):
+    users: list[AssignableStaffItem]

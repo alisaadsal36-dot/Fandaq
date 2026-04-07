@@ -411,7 +411,6 @@ async def _process_message(msg, db: AsyncSession, source: str = "whatsapp", forc
         # 11. Extract intent via AI (same AI brain for WhatsApp & Telegram)
         guest_name_for_ai = None
         guest_nationality_for_ai = None
-        guest_id_number_for_ai = None
         guest_room_number_for_ai = None
 
         if not is_owner and guest_id:
@@ -441,8 +440,6 @@ async def _process_message(msg, db: AsyncSession, source: str = "whatsapp", forc
                 guest_name_for_ai = guest.name
             if guest.nationality:
                 guest_nationality_for_ai = guest.nationality
-            if guest.id_number:
-                guest_id_number_for_ai = guest.id_number
 
         intent_result = await extract_intent(
             msg.text,
@@ -451,7 +448,6 @@ async def _process_message(msg, db: AsyncSession, source: str = "whatsapp", forc
             hotel_name=hotel.name,
             guest_name=guest_name_for_ai,
             guest_nationality=guest_nationality_for_ai,
-            guest_id_number=guest_id_number_for_ai,
             guest_room_number=guest_room_number_for_ai,
         )
         
@@ -467,7 +463,7 @@ async def _process_message(msg, db: AsyncSession, source: str = "whatsapp", forc
         # 10. Actionable intents — dispatch to service for execution
         ACTIONABLE_INTENTS = {
             "create_reservation", "cancel_reservation", "check_availability",
-            "approve_reservation", "reject_reservation", "add_expense",
+            "approve_reservation", "reject_reservation",
             "get_report", "guest_request", "complaint", "hotel_selection",
             "submit_review", "update_profile",
         }

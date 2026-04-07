@@ -2,6 +2,7 @@
 //  PAGE: COMPLAINTS & REQUESTS
 // ══════════════════════════════════════════════
 let compTab = 'complaints';
+let ASSIGNABLE_STAFF = [];
 const SLA_FIRST_RESPONSE_MINUTES = 15;
 const SLA_RESOLUTION_HOURS = 4;
 async function loadComplaints() {
@@ -12,11 +13,13 @@ async function loadComplaints() {
       document.getElementById('content').innerHTML = '<div class="loading-text" style="text-align:center;padding:40px">جاري جلب البيانات...</div>';
   }
 
-  const [comps, reqs] = await Promise.all([
+  const [comps, reqs, staffRes] = await Promise.all([
     apiFetch(`/hotels/${HOTEL_ID}/complaints?limit=100`, { useCache: false }).catch(() => ({ complaints: [] })),
-    apiFetch(`/hotels/${HOTEL_ID}/guest-requests?limit=100`, { useCache: false }).catch(() => ({ requests: [] }))
+    apiFetch(`/hotels/${HOTEL_ID}/guest-requests?limit=100`, { useCache: false }).catch(() => ({ requests: [] })),
+    apiFetch(`/hotels/${HOTEL_ID}/assignable-staff`, { useCache: false }).catch(() => ({ users: [] })),
   ]);
   const complaints = comps.complaints || []; const requests = reqs.requests || [];
+  ASSIGNABLE_STAFF = staffRes.users || [];
   GLOBAL_DATA.all_comps = complaints; GLOBAL_DATA.all_reqs = requests;
   
   renderCompReqUI();
@@ -77,8 +80,9 @@ function filterCompReq(q) {
 
 function renderComplaints(list) {
   const canSeeActor = CURRENT_USER && ['admin', 'supervisor'].includes(CURRENT_USER.role);
+  const canAssign = canSeeActor;
   if (!list.length) return '<div class="empty-state"><div class="emoji">🎉</div>لا توجد شكاوى</div>';
-  return `<div class="table-card"><table><thead><tr><th>الغرفة والضيف</th><th>النص</th><th>التاريخ</th><th>الحالة</th><th>SLA</th>${canSeeActor ? '<th>تم الحل بواسطة</th>' : ''}<th>تحديث</th></tr></thead>
+  return `<div class="table-card"><table><thead><tr><th>الغرفة والضيف</th><th>النص</th><th>التاريخ</th><th>الحالة</th><th>SLA</th>${canAssign ? '<th>المسؤول</th>' : ''}${canSeeActor ? '<th>تم الحل بواسطة</th>' : ''}<th>تحديث</th></tr></thead>
     <tbody>${list.map(c => {
       let guestInfo = '<span style="color:var(--text-muted);font-size:12px">غير محدد</span>';
       if (c.guest_name) {
@@ -92,6 +96,7 @@ function renderComplaints(list) {
       <td style="max-width:300px">${c.text}</td><td>${fmtDate(c.created_at)}</td>
       <td>${badgeHtml(c.status)}</td>
       <td>${sla}</td>
+      ${canAssign ? `<td>${renderAssignControl(c.id, c.assigned_to_user_id, 'complaint')}</td>` : ''}
       ${canSeeActor ? `<td>${c.resolved_by_name || '—'}</td>` : ''}
       <td><select onchange="updateComplaint('${c.id}', this.value)" style="font-size:11px">
         <option value="open" ${c.status === 'open' ? 'selected' : ''}>مفتوح</option>
@@ -102,11 +107,45 @@ function renderComplaints(list) {
 }
 
 function renderRequests(list) {
+  const canAssign = CURRENT_USER && ['admin', 'supervisor'].includes(CURRENT_USER.role);
   if (!list.length) return '<div class="empty-state"><div class="emoji">✅</div>لا توجد طلبات</div>';
-  return `<div class="table-card"><table><thead><tr><th>نوع الطلب</th><th>التفاصيل</th><th>التاريخ</th><th>الحالة</th><th>SLA</th></tr></thead>
+  return `<div class="table-card"><table><thead><tr><th>نوع الطلب</th><th>التفاصيل</th><th>التاريخ</th><th>الحالة</th><th>SLA</th>${canAssign ? '<th>المسؤول</th>' : ''}<th>التسليم</th><th>تحديث</th></tr></thead>
     <tbody>${list.map(r => `<tr>
       <td><strong>${r.request_type}</strong></td><td>${r.details || '—'}</td>
-      <td>${fmtDate(r.created_at)}</td><td>${badgeHtml(r.status)}</td><td>${requestSlaBadge(r)}</td></tr>`).join('')}</tbody></table></div>`;
+      <td>${fmtDate(r.created_at)}</td><td>${badgeHtml(r.status)}</td><td>${requestSlaBadge(r)}</td>
+      ${canAssign ? `<td>${renderAssignControl(r.id, r.assigned_to_user_id, 'request')}</td>` : ''}
+      <td>${renderFulfillmentSummary(r)}</td>
+      <td>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <select onchange="updateRequest('${r.id}', this.value)" style="font-size:11px">
+            <option value="open" ${r.status === 'open' ? 'selected' : ''}>مفتوح</option>
+            <option value="in_progress" ${r.status === 'in_progress' ? 'selected' : ''}>جاري</option>
+            <option value="completed" ${r.status === 'completed' ? 'selected' : ''}>مكتمل</option>
+          </select>
+          <button class="btn btn-sm btn-success" onclick="markDelivered('${r.id}', '${(r.request_type || '').replace(/'/g, "\\'")}')">✅ تم التسليم</button>
+          <button class="btn btn-sm" onclick="showFulfillmentModal('${r.id}')">➕ إجراء</button>
+        </div>
+      </td></tr>`).join('')}</tbody></table></div>`;
+}
+
+function renderAssignControl(itemId, selectedUserId, target) {
+  if (!ASSIGNABLE_STAFF.length) return '<span style="color:var(--text-muted)">لا يوجد موظفون</span>';
+  const options = ASSIGNABLE_STAFF.map(u => {
+    const roleLabel = u.role === 'supervisor' ? 'مشرف' : 'موظف';
+    const selected = String(selectedUserId || '') === String(u.id) ? 'selected' : '';
+    return `<option value="${u.id}" ${selected}>${u.full_name} (${roleLabel})</option>`;
+  }).join('');
+  const handler = target === 'complaint' ? `assignComplaint('${itemId}', this.value)` : `assignRequest('${itemId}', this.value)`;
+  return `<select onchange="${handler}" style="font-size:11px;max-width:180px"><option value="">-- اختر --</option>${options}</select>`;
+}
+
+function renderFulfillmentSummary(requestItem) {
+  const details = requestItem.fulfillment_details || [];
+  if (!details.length) return '<span style="color:var(--text-muted)">لا يوجد تسجيل</span>';
+  const last = details[details.length - 1] || {};
+  const statusMap = { delivered: 'تم التسليم', pending: 'معلق', failed: 'فشل' };
+  const statusLabel = statusMap[last.status] || (requestItem.fulfillment_status || 'partial');
+  return `<div style="font-size:12px"><strong>${statusLabel}</strong><br><span style="color:var(--text-muted)">${last.item || '—'}</span></div>`;
 }
 
 function hoursBetween(start, end) {
@@ -229,5 +268,103 @@ async function updateComplaint(id, status) {
     await loadComplaints();
     loadBadges();
   } catch (e) { showToast('فشل التحديث', 'error'); }
+}
+
+async function assignComplaint(id, assignedToUserId) {
+  if (!assignedToUserId) return;
+  try {
+    await apiFetch(`/hotels/${HOTEL_ID}/complaints/${id}/assign`, {
+      method: 'PATCH',
+      body: JSON.stringify({ assigned_to_user_id: assignedToUserId })
+    });
+    showToast('تم تعيين مسؤول حل الشكوى');
+    if(typeof clearApiCache === 'function') clearApiCache();
+    await loadComplaints();
+  } catch (e) {
+    showToast('فشل تعيين المسؤول', 'error');
+  }
+}
+
+async function updateRequest(id, status) {
+  try {
+    await apiFetch(`/hotels/${HOTEL_ID}/guest-requests/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+    showToast('تم تحديث حالة الطلب');
+    if(typeof clearApiCache === 'function') clearApiCache();
+    await loadComplaints();
+    loadBadges();
+  } catch (e) {
+    showToast('فشل تحديث الطلب', 'error');
+  }
+}
+
+async function assignRequest(id, assignedToUserId) {
+  if (!assignedToUserId) return;
+  try {
+    await apiFetch(`/hotels/${HOTEL_ID}/guest-requests/${id}/assign`, {
+      method: 'PATCH',
+      body: JSON.stringify({ assigned_to_user_id: assignedToUserId })
+    });
+    showToast('تم تعيين مسؤول تنفيذ الطلب');
+    if(typeof clearApiCache === 'function') clearApiCache();
+    await loadComplaints();
+  } catch (e) {
+    showToast('فشل تعيين المسؤول', 'error');
+  }
+}
+
+async function markDelivered(id, requestType) {
+  const item = (requestType || '').trim() || 'عنصر خدمة';
+  try {
+    await apiFetch(`/hotels/${HOTEL_ID}/guest-requests/${id}/fulfillment`, {
+      method: 'POST',
+      body: JSON.stringify({ item, status: 'delivered', notes: 'تم التسليم' })
+    });
+    showToast(`تم تسجيل التسليم: ${item}`);
+    if(typeof clearApiCache === 'function') clearApiCache();
+    await loadComplaints();
+  } catch (e) {
+    showToast('فشل تسجيل التسليم', 'error');
+  }
+}
+
+function showFulfillmentModal(id) {
+  const body = `
+    <div class="form-group"><label>العنصر</label><input id="ful-item" type="text" placeholder="مثال: منشفة"></div>
+    <div class="form-group"><label>الحالة</label>
+      <select id="ful-status">
+        <option value="delivered">تم التسليم</option>
+        <option value="pending">معلق</option>
+        <option value="failed">فشل</option>
+      </select>
+    </div>
+    <div class="form-group"><label>ملاحظات</label><input id="ful-notes" type="text" placeholder="اختياري"></div>
+  `;
+  const foot = `
+    <button class="btn" onclick="closeModal()">إلغاء</button>
+    <button class="btn btn-primary" onclick="submitFulfillment('${id}')">حفظ</button>
+  `;
+  openModal('تسجيل إجراء خدمة', body, foot);
+}
+
+async function submitFulfillment(id) {
+  const item = (document.getElementById('ful-item')?.value || '').trim();
+  const status = document.getElementById('ful-status')?.value;
+  const notes = (document.getElementById('ful-notes')?.value || '').trim();
+  if (!item || !status) {
+    showToast('أكمل بيانات الإجراء', 'error');
+    return;
+  }
+  try {
+    await apiFetch(`/hotels/${HOTEL_ID}/guest-requests/${id}/fulfillment`, {
+      method: 'POST',
+      body: JSON.stringify({ item, status, notes: notes || null })
+    });
+    closeModal();
+    showToast('تم تسجيل الإجراء بنجاح');
+    if(typeof clearApiCache === 'function') clearApiCache();
+    await loadComplaints();
+  } catch (e) {
+    showToast('فشل تسجيل الإجراء', 'error');
+  }
 }
 
